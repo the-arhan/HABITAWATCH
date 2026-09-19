@@ -278,39 +278,112 @@ class HabitatMapController {
     }
 
     /**
+     * Calculate spherical geodesic area in km² for a polygon of [lat, lng] points
+     */
+    calculatePolygonAreaKm2(coords) {
+        if (!coords || coords.length < 3) return 0;
+        const R = 6371; // Earth mean radius in km
+        let area = 0;
+        for (let i = 0; i < coords.length; i++) {
+            const j = (i + 1) % coords.length;
+            const p1 = coords[i];
+            const p2 = coords[j];
+            const lat1 = (p1[0] * Math.PI) / 180;
+            const lat2 = (p2[0] * Math.PI) / 180;
+            const dLng = ((p2[1] - p1[1]) * Math.PI) / 180;
+            area += dLng * (2 + Math.sin(lat1) + Math.sin(lat2));
+        }
+        area = Math.abs((area * R * R) / 2);
+        return Math.max(0.5, parseFloat(area.toFixed(1)));
+    }
+
+    /**
      * Custom drawing tools setup
      */
     setDrawMode(mode) {
         this.currentDrawMode = mode;
         this.tempDrawPoints = [];
+        this._clearTempDrawing();
+
+        const banner = document.getElementById("map-draw-banner");
+        const bannerText = document.getElementById("draw-banner-text");
+        const finishBtn = document.getElementById("btn-finish-draw");
+
+        if (mode) {
+            this.map.getContainer().style.cursor = "crosshair";
+            if (banner) banner.classList.add("active");
+            if (bannerText) {
+                if (mode === "line") {
+                    bannerText.innerText = "Drawing Corridor: Click points along the route. Double-click or click Finish.";
+                } else if (mode === "rectangle") {
+                    bannerText.innerText = "Drawing Rectangle: Click two opposite corners on the map.";
+                } else {
+                    bannerText.innerText = "Drawing Area: Click points on the map to define the perimeter. Double-click or click Finish.";
+                }
+            }
+            if (finishBtn) finishBtn.innerText = `Finish (${mode})`;
+            window.app?.showToast(`Click on map to draw ${mode}.`);
+        } else {
+            this.map.getContainer().style.cursor = "";
+            if (banner) banner.classList.remove("active");
+        }
+    }
+
+    _clearTempDrawing() {
         if (this.tempDrawLine) {
             this.map.removeLayer(this.tempDrawLine);
             this.tempDrawLine = null;
         }
-
-        if (mode) {
-            this.map.getContainer().style.cursor = "crosshair";
-            window.app?.showToast(`Click on map to draw ${mode}. Double-click or complete to finish.`);
-        } else {
-            this.map.getContainer().style.cursor = "";
+        if (this.tempDrawMarkers) {
+            this.tempDrawMarkers.forEach(m => this.map.removeLayer(m));
         }
+        this.tempDrawMarkers = [];
     }
 
     clearDrawnItems() {
         this.drawnItems.clearLayers();
-        if (this.tempDrawLine) {
-            this.map.removeLayer(this.tempDrawLine);
-            this.tempDrawLine = null;
-        }
+        this._clearTempDrawing();
         this.tempDrawPoints = [];
+        this.lastDrawnGeometry = null;
+        this.setDrawMode(null);
+    }
+
+    finishCurrentDraw() {
+        if (!this.currentDrawMode) return;
+
+        if (this.currentDrawMode === "line" && this.tempDrawPoints.length >= 2) {
+            this._finalizeCorridorLine();
+        } else if (this.currentDrawMode === "polygon" && this.tempDrawPoints.length >= 3) {
+            this._finalizePolygon();
+        } else if (this.currentDrawMode === "rectangle" && this.tempDrawPoints.length >= 2) {
+            this._finalizeRectangle();
+        } else {
+            window.app?.showToast("Add more points on the map before completing.");
+        }
     }
 
     _setupDrawingEvents() {
+        this.tempDrawMarkers = [];
+
         this.map.on("click", (e) => {
             if (!this.currentDrawMode) return;
 
             const latlng = e.latlng;
-            this.tempDrawPoints.push([latlng.lat, latlng.lng]);
+            const pt = [latlng.lat, latlng.lng];
+            this.tempDrawPoints.push(pt);
+
+            // Add small vertex dot marker
+            const dot = L.circleMarker(latlng, {
+                radius: 4,
+                color: "#355443",
+                fillColor: "#FFFFFF",
+                fillOpacity: 1,
+                weight: 2
+            }).addTo(this.map);
+            this.tempDrawMarkers.push(dot);
+
+            const finishBtn = document.getElementById("btn-finish-draw");
+            if (finishBtn) finishBtn.innerText = `Finish (${this.tempDrawPoints.length} pts)`;
 
             if (this.currentDrawMode === "line") {
                 if (this.tempDrawPoints.length === 1) {
@@ -318,55 +391,177 @@ class HabitatMapController {
                 } else {
                     this.tempDrawLine.setLatLngs(this.tempDrawPoints);
                 }
-
-                // If user clicks 3 points or double clicks, finalize corridor line
-                if (this.tempDrawPoints.length >= 3) {
-                    this._finalizeCorridorLine();
+            } else if (this.currentDrawMode === "polygon") {
+                if (this.tempDrawPoints.length === 1) {
+                    this.tempDrawLine = L.polyline(this.tempDrawPoints, { color: "#557A61", weight: 2, dashArray: "4, 4" }).addTo(this.map);
+                } else {
+                    this.tempDrawLine.setLatLngs([...this.tempDrawPoints, this.tempDrawPoints[0]]);
                 }
             } else if (this.currentDrawMode === "rectangle") {
                 if (this.tempDrawPoints.length === 2) {
-                    const bounds = [this.tempDrawPoints[0], this.tempDrawPoints[1]];
-                    const rect = L.rectangle(bounds, {
-                        color: "#557A61",
-                        weight: 2,
-                        fillColor: "#7E9B7A",
-                        fillOpacity: 0.2
-                    }).addTo(this.drawnItems);
-
-                    rect.bindPopup("<strong>Custom Monitored Rectangle</strong><br>Area: ~14.8 km²<br><button class='btn-sm btn-primary' onclick='window.app.analyzeDrawnArea()'>Analyze Area</button>");
-                    this.setDrawMode(null);
-                    rect.openPopup();
-                }
-            } else if (this.currentDrawMode === "polygon") {
-                if (this.tempDrawPoints.length >= 4) {
-                    const poly = L.polygon(this.tempDrawPoints, {
-                        color: "#557A61",
-                        weight: 2,
-                        fillColor: "#7E9B7A",
-                        fillOpacity: 0.2
-                    }).addTo(this.drawnItems);
-
-                    poly.bindPopup("<strong>Custom Monitored Polygon</strong><br>Area: ~21.2 km²<br><button class='btn-sm btn-primary' onclick='window.app.analyzeDrawnArea()'>Analyze Area</button>");
-                    this.setDrawMode(null);
-                    poly.openPopup();
+                    this._finalizeRectangle();
                 }
             }
         });
 
-        this.map.on("dblclick", () => {
-            if (this.currentDrawMode === "line" && this.tempDrawPoints.length >= 2) {
-                this._finalizeCorridorLine();
+        this.map.on("dblclick", (e) => {
+            if (this.currentDrawMode) {
+                L.DomEvent.stop(e);
+                this.finishCurrentDraw();
             }
         });
     }
 
-    _finalizeCorridorLine() {
-        if (this.tempDrawLine) {
-            this.map.removeLayer(this.tempDrawLine);
-            this.tempDrawLine = null;
-        }
+    _finalizePolygon() {
+        const coords = [...this.tempDrawPoints];
+        this._clearTempDrawing();
 
-        const polyline = L.polyline(this.tempDrawPoints, {
+        const poly = L.polygon(coords, {
+            color: "#355443",
+            weight: 2.5,
+            fillColor: "#557A61",
+            fillOpacity: 0.25
+        }).addTo(this.drawnItems);
+
+        const areaKm2 = this.calculatePolygonAreaKm2(coords);
+        const bounds = poly.getBounds();
+        const center = [bounds.getCenter().lat, bounds.getCenter().lng];
+
+        this.lastDrawnGeometry = {
+            type: "polygon",
+            coords: coords,
+            areaKm2: areaKm2,
+            center: center,
+            bounds: bounds
+        };
+
+        const popupContent = `
+            <div style="min-width: 220px; font-size: 12px;">
+                <div style="font-size: 10px; font-weight: 700; color: #557A61; text-transform: uppercase;">
+                    Custom Monitoring Boundary
+                </div>
+                <h4 style="font-size: 14px; margin: 4px 0 6px 0; color: #1C2520;">Drawn Area Perimeter</h4>
+                <div style="margin-bottom: 8px; line-height: 1.5; color: #5F6B63;">
+                    <div><strong>Calculated Extent:</strong> ${areaKm2} km²</div>
+                    <div><strong>Centroid:</strong> ${center[0].toFixed(3)}&deg; N, ${center[1].toFixed(3)}&deg; E</div>
+                    <div><strong>Vertices:</strong> ${coords.length} boundary points</div>
+                </div>
+                <button onclick="window.app.analyzeDrawnGeometry()" style="
+                    background: #355443;
+                    color: #FFF;
+                    border: none;
+                    font-size: 11.5px;
+                    font-weight: 600;
+                    padding: 6px 12px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    width: 100%;
+                    margin-bottom: 6px;
+                ">Analyze Drawn Area &rarr;</button>
+                <button onclick="window.app.saveCustomDrawnArea()" style="
+                    background: #EEF1EC;
+                    color: #355443;
+                    border: 1px solid #DCE2DC;
+                    font-size: 11px;
+                    font-weight: 600;
+                    padding: 5px 10px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    width: 100%;
+                ">Save to Monitored Areas</button>
+            </div>
+        `;
+
+        poly.bindPopup(popupContent);
+        this.setDrawMode(null);
+        poly.openPopup();
+        this.map.fitBounds(bounds, { padding: [40, 40] });
+    }
+
+    _finalizeRectangle() {
+        const p1 = this.tempDrawPoints[0];
+        const p2 = this.tempDrawPoints[1];
+        this._clearTempDrawing();
+
+        const bounds = [p1, p2];
+        const rect = L.rectangle(bounds, {
+            color: "#355443",
+            weight: 2.5,
+            fillColor: "#557A61",
+            fillOpacity: 0.25
+        }).addTo(this.drawnItems);
+
+        const latMin = Math.min(p1[0], p2[0]);
+        const latMax = Math.max(p1[0], p2[0]);
+        const lngMin = Math.min(p1[1], p2[1]);
+        const lngMax = Math.max(p1[1], p2[1]);
+
+        const polyCoords = [
+            [latMin, lngMin],
+            [latMax, lngMin],
+            [latMax, lngMax],
+            [latMin, lngMax]
+        ];
+
+        const areaKm2 = this.calculatePolygonAreaKm2(polyCoords);
+        const rectBounds = rect.getBounds();
+        const center = [rectBounds.getCenter().lat, rectBounds.getCenter().lng];
+
+        this.lastDrawnGeometry = {
+            type: "rectangle",
+            coords: polyCoords,
+            areaKm2: areaKm2,
+            center: center,
+            bounds: rectBounds
+        };
+
+        const popupContent = `
+            <div style="min-width: 220px; font-size: 12px;">
+                <div style="font-size: 10px; font-weight: 700; color: #557A61; text-transform: uppercase;">
+                    Custom Monitored Rectangle
+                </div>
+                <h4 style="font-size: 14px; margin: 4px 0 6px 0; color: #1C2520;">Drawn Area Extent</h4>
+                <div style="margin-bottom: 8px; line-height: 1.5; color: #5F6B63;">
+                    <div><strong>Calculated Extent:</strong> ${areaKm2} km²</div>
+                    <div><strong>Centroid:</strong> ${center[0].toFixed(3)}&deg; N, ${center[1].toFixed(3)}&deg; E</div>
+                </div>
+                <button onclick="window.app.analyzeDrawnGeometry()" style="
+                    background: #355443;
+                    color: #FFF;
+                    border: none;
+                    font-size: 11.5px;
+                    font-weight: 600;
+                    padding: 6px 12px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    width: 100%;
+                    margin-bottom: 6px;
+                ">Analyze Drawn Area &rarr;</button>
+                <button onclick="window.app.saveCustomDrawnArea()" style="
+                    background: #EEF1EC;
+                    color: #355443;
+                    border: 1px solid #DCE2DC;
+                    font-size: 11px;
+                    font-weight: 600;
+                    padding: 5px 10px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    width: 100%;
+                ">Save to Monitored Areas</button>
+            </div>
+        `;
+
+        rect.bindPopup(popupContent);
+        this.setDrawMode(null);
+        rect.openPopup();
+        this.map.fitBounds(rectBounds, { padding: [40, 40] });
+    }
+
+    _finalizeCorridorLine() {
+        const coords = [...this.tempDrawPoints];
+        this._clearTempDrawing();
+
+        const polyline = L.polyline(coords, {
             color: "#C59A55",
             weight: 4,
             opacity: 0.9
@@ -374,20 +569,21 @@ class HabitatMapController {
 
         // Compute route distance
         let totalDistanceMeters = 0;
-        for (let i = 0; i < this.tempDrawPoints.length - 1; i++) {
-            const p1 = L.latLng(this.tempDrawPoints[i]);
-            const p2 = L.latLng(this.tempDrawPoints[i + 1]);
+        for (let i = 0; i < coords.length - 1; i++) {
+            const p1 = L.latLng(coords[i]);
+            const p2 = L.latLng(coords[i + 1]);
             totalDistanceMeters += p1.distanceTo(p2);
         }
-        const distanceKm = (totalDistanceMeters / 1000).toFixed(1);
+        const distanceKm = Math.max(0.5, parseFloat((totalDistanceMeters / 1000).toFixed(1)));
 
-        // Simulated potential connectivity assessment
+        // Potential connectivity assessment
+        const breaks = distanceKm > 8 ? 3 : (distanceKm > 4 ? 2 : 1);
         const assessment = {
             length: `${distanceKm} km`,
             continuity: distanceKm > 10 ? "Moderate" : "Good",
-            breaks: distanceKm > 8 ? 3 : 1,
+            breaks: breaks,
             builtOverlap: (distanceKm * 0.14).toFixed(1) + " km",
-            waterCrossings: 2
+            waterCrossings: Math.min(4, Math.max(1, Math.round(distanceKm / 4)))
         };
 
         const popupContent = `

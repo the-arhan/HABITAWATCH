@@ -49,6 +49,11 @@
           <button type="button" id="view-mode-detailed" class="active" title="Technical GIS & Indices Mode">Detailed</button>
         </div>
 
+        <!-- Saved Areas Button -->
+        <button type="button" class="btn btn-sm btn-secondary" id="btn-open-saved-areas" onclick="window.app.openSavedAreasModal()" title="View saved monitoring perimeters">
+          <span>Saved Areas</span>
+        </button>
+
         <!-- Investigation Queue Trigger Button -->
         <button type="button" class="btn btn-sm btn-secondary" id="btn-open-queue" onclick="window.app.openQueueModal()" aria-label="Open Investigation Queue">
           <span>Queue</span>
@@ -171,8 +176,11 @@
             <button type="button" class="btn btn-sm btn-secondary" id="btn-draw-corridor" onclick="window.app.mapController.setDrawMode('line')" title="Draw a route to test potential wildlife connectivity">
               <span>Assess Corridor</span>
             </button>
-            <button type="button" class="btn btn-sm btn-secondary" id="btn-draw-poly" onclick="window.app.mapController.setDrawMode('polygon')" title="Draw custom polygon area">
+            <button type="button" class="btn btn-sm btn-secondary" id="btn-draw-poly" onclick="window.app.mapController.setDrawMode('polygon')" title="Draw custom polygon boundary">
               <span>Draw Area</span>
+            </button>
+            <button type="button" class="btn btn-sm btn-secondary" id="btn-draw-rect" onclick="window.app.mapController.setDrawMode('rectangle')" title="Draw custom rectangle extent">
+              <span>Draw Rect</span>
             </button>
 
             <!-- Primary Analyze CTA -->
@@ -303,23 +311,53 @@
             </div>
 
             <!-- Leaflet Container -->
-            <div id="monitoring-map"></div>
+            <div style="position: relative;">
+              <div id="monitoring-map"></div>
+
+              <!-- Interactive Drawing Banner -->
+              <div class="map-draw-banner" id="map-draw-banner" role="status" aria-live="polite">
+                <span id="draw-banner-text">Drawing Mode: Click points on the map.</span>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <button type="button" class="btn btn-sm btn-primary" id="btn-finish-draw" onclick="window.app.mapController.finishCurrentDraw()">
+                    Finish Area
+                  </button>
+                  <button type="button" class="btn btn-sm btn-secondary" id="btn-cancel-draw" onclick="window.app.mapController.clearDrawnItems()">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
 
             <!-- Before/After Comparison Overlay Container -->
             <div class="compare-container" id="compare-container" aria-label="Before and After Split Slider Comparison">
+              <div class="compare-header-overlay">
+                <div class="compare-title-tag">
+                  <strong>Observation Comparison</strong>: <span id="compare-region-name">Kanha Landscape</span>
+                </div>
+                <button type="button" class="btn btn-sm btn-secondary compare-close-btn" onclick="window.app.toggleCompareSlider()" title="Exit comparison mode">
+                  &times; Exit Compare
+                </button>
+              </div>
+
+              <!-- Before Layer (Baseline) -->
               <div class="compare-layer-before">
-                <img src="https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=1200&q=80" style="width: 100%; height: 100%; object-fit: cover;" alt="Baseline Year Canopy">
-                <span style="position: absolute; bottom: 12px; left: 16px; background: rgba(0,0,0,0.65); color: #FFF; padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 700;">
-                  2025 (Baseline Observation)
-                </span>
+                <img id="compare-img-before" src="https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=1400&q=80" alt="Baseline Observation">
+                <div class="compare-badge compare-badge-before" id="compare-label-before">
+                  <strong>2025 Baseline Observation</strong> &bull; Healthy Sal Forest Canopy
+                </div>
               </div>
-              <div class="compare-layer-after">
-                <img src="https://images.unsplash.com/photo-1511497584788-87676104235f?auto=format&fit=crop&w=1200&q=80" style="width: 100%; height: 100%; object-fit: cover;" alt="Comparison Year Canopy">
-                <span style="position: absolute; bottom: 12px; right: 16px; background: rgba(0,0,0,0.65); color: #FFF; padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 700;">
-                  2026 (Recent Observation)
-                </span>
+
+              <!-- After Layer (Comparison Period) -->
+              <div class="compare-layer-after" id="compare-layer-after">
+                <img id="compare-img-after" src="https://images.unsplash.com/photo-1511497584788-87676104235f?auto=format&fit=crop&w=1400&q=80" alt="Comparison Observation">
+                <div class="compare-badge compare-badge-after" id="compare-label-after">
+                  <strong>2026 Comparison Period</strong> &bull; Canopy Opening & Moisture Stress
+                </div>
               </div>
-              <div class="compare-slider-handle" id="compare-slider-handle" title="Drag horizontally to compare before and after">
+
+              <!-- Vertical Divider Line & Slider Handle -->
+              <div class="compare-divider" id="compare-divider"></div>
+              <div class="compare-slider-handle" id="compare-slider-handle" role="slider" aria-label="Drag horizontally to compare before and after observations" tabindex="0">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="15 18 9 12 15 6"></polyline>
                   <polyline points="9 18 3 12 9 6"></polyline>
@@ -526,6 +564,27 @@
           Track flagged areas from detection through field patrol and ground verification.
         </p>
         <div id="investigation-queue-container">
+          <!-- Populated by app.js -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="window.app.closeAllModals()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Saved Monitoring Areas Modal -->
+  <div class="modal-backdrop" id="saved-areas-modal" role="dialog" aria-modal="true" aria-labelledby="saved-areas-modal-title">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title" id="saved-areas-modal-title">Saved Monitoring Areas</h3>
+        <button type="button" class="modal-close-btn" onclick="window.app.closeAllModals()" aria-label="Close dialog">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+          Saved custom boundaries, perimeters, and corridors preserved in local storage.
+        </p>
+        <div id="saved-areas-list-container">
           <!-- Populated by app.js -->
         </div>
       </div>

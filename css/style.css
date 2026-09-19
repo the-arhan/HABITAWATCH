@@ -877,6 +877,29 @@ p {
   z-index: 1;
 }
 
+/* Interactive Drawing Banner across Map */
+.map-draw-banner {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  background: var(--forest);
+  color: #FFFFFF;
+  padding: 0.65rem 1rem;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.82rem;
+  z-index: 50;
+  animation: fadeIn 0.2s ease;
+}
+
+.map-draw-banner.active {
+  display: flex;
+}
+
 /* Before/After Split Comparison Overlay on Map */
 .compare-container {
   position: relative;
@@ -884,29 +907,113 @@ p {
   height: 520px;
   overflow: hidden;
   display: none;
+  background: #1C2520;
+  user-select: none;
+  cursor: ew-resize;
 }
 
 .compare-container.active {
   display: block;
 }
 
-.compare-layer-before, .compare-layer-after {
+.compare-header-overlay {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 35;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
 }
 
-.compare-layer-before {
-  background: #557A61;
+.compare-header-overlay > * {
+  pointer-events: auto;
+}
+
+.compare-title-tag {
+  background: rgba(28, 37, 32, 0.88);
+  color: #FFFFFF;
+  padding: 6px 14px;
+  border-radius: var(--radius-md);
+  font-size: 0.82rem;
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: var(--shadow-sm);
+}
+
+.compare-close-btn {
+  background: #FFFFFF;
+  color: var(--forest);
+  font-weight: 700;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border);
+}
+
+.compare-close-btn:hover {
+  background: #F5F6F2;
+}
+
+.compare-layer-before, .compare-layer-after {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.compare-layer-before img, .compare-layer-after img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  pointer-events: none;
 }
 
 .compare-layer-after {
-  background: #355443;
-  width: 50%;
-  border-right: 2px solid #FFFFFF;
-  box-shadow: 2px 0 10px rgba(0,0,0,0.3);
+  clip-path: inset(0 0 0 50%);
+  transition: none;
+}
+
+.compare-badge {
+  position: absolute;
+  bottom: 16px;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  font-size: 0.8rem;
+  color: #FFFFFF;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+  z-index: 20;
+  pointer-events: none;
+  max-width: 45%;
+  line-height: 1.35;
+}
+
+.compare-badge-before {
+  left: 16px;
+  background: rgba(53, 84, 67, 0.9);
+  border: 1px solid rgba(126, 155, 122, 0.4);
+}
+
+.compare-badge-after {
+  right: 16px;
+  background: rgba(183, 101, 85, 0.9);
+  border: 1px solid rgba(248, 236, 233, 0.4);
+}
+
+.compare-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  background: #FFFFFF;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.6);
+  z-index: 25;
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 
 .compare-slider-handle {
@@ -914,17 +1021,25 @@ p {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 36px;
-  height: 36px;
+  width: 42px;
+  height: 42px;
   background: #FFFFFF;
-  border: 2px solid var(--forest);
+  border: 2.5px solid var(--forest);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: ew-resize;
-  box-shadow: var(--shadow-md);
-  z-index: 20;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+  z-index: 30;
+  color: var(--forest);
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.compare-slider-handle:hover, .compare-slider-handle:focus-visible {
+  transform: translate(-50%, -50%) scale(1.1);
+  box-shadow: 0 6px 22px rgba(0,0,0,0.45);
+  outline: 2px solid var(--forest);
 }
 
 /* Map Footer / Legend */

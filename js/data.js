@@ -35,6 +35,10 @@ const DEMO_DATA = {
             focus: ["Vegetation Change", "Habitat Continuity", "Water Bodies"],
             image: "https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=1200&q=80",
             imageAlt: "Misty lush deciduous forest canopy in central India landscape",
+            compareBeforeImage: "https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=1400&q=80",
+            compareAfterImage: "https://images.unsplash.com/photo-1511497584788-87676104235f?auto=format&fit=crop&w=1400&q=80",
+            compareBeforeLabel: "2025 Baseline Observation — Healthy Sal Forest Canopy",
+            compareAfterLabel: "2026 Comparison Period — Canopy Opening & Moisture Stress",
             boundaryGeoJSON: {
                 type: "Feature",
                 properties: { name: "Kanha Monitoring Boundary" },
@@ -70,6 +74,10 @@ const DEMO_DATA = {
             focus: ["Vegetation Change", "Fragmentation", "Linear Infrastructure"],
             image: "https://images.unsplash.com/photo-1511497584788-87676104235f?auto=format&fit=crop&w=1200&q=80",
             imageAlt: "Highland tropical forest ridge with morning mist",
+            compareBeforeImage: "https://images.unsplash.com/photo-1511497584788-87676104235f?auto=format&fit=crop&w=1400&q=80",
+            compareAfterImage: "https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=1400&q=80",
+            compareBeforeLabel: "2025 Baseline Observation — Continuous Wet Evergreen Corridor",
+            compareAfterLabel: "2026 Comparison Period — Linear Road Corridor Fragmentation",
             boundaryGeoJSON: {
                 type: "Feature",
                 properties: { name: "Western Ghats Monitoring Boundary" },
@@ -105,6 +113,10 @@ const DEMO_DATA = {
             focus: ["Water-Body Changes", "Vegetation Salinity", "Shoreline Dynamics"],
             image: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80",
             imageAlt: "Tidal mangrove estuary waterway with lush shoreline vegetation",
+            compareBeforeImage: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1400&q=80",
+            compareAfterImage: "https://images.unsplash.com/photo-1511497584788-87676104235f?auto=format&fit=crop&w=1400&q=80",
+            compareBeforeLabel: "2025 Baseline Observation — Intertidal Mangrove Islands",
+            compareAfterLabel: "2026 Comparison Period — Shoreline Shift & Channel Expansion",
             boundaryGeoJSON: {
                 type: "Feature",
                 properties: { name: "Sundarbans Monitoring Boundary" },
@@ -570,14 +582,136 @@ const HabitatDataProvider = {
     },
 
     /**
+     * Retrieve analysis for a custom drawn user geometry
+     */
+    async getCustomAreaAnalysis(geometry, beforeYear, afterYear) {
+        await new Promise(resolve => setTimeout(resolve, 40));
+        const areaKm2 = geometry.areaKm2 || 14.8;
+        const yearDiff = Math.max(1, afterYear - beforeYear);
+        const vegDelta = -(3.8 * yearDiff + (parseFloat(areaKm2) % 4)).toFixed(1);
+        const waterDelta = -(1.1 * yearDiff + (parseFloat(areaKm2) % 2)).toFixed(1);
+        const health = Math.max(50, Math.min(88, Math.round(75 - yearDiff * 4 - (areaKm2 > 25 ? 4 : 0))));
+
+        const center = geometry.center || [22.33, 80.61];
+        const lat = center[0];
+        const lng = center[1];
+        const offset = Math.min(0.035, Math.max(0.012, Math.sqrt(areaKm2) * 0.004));
+
+        const hotspots = [
+            {
+                id: "CUST-01",
+                name: "Custom Perimeter — Sector North",
+                regionId: "custom",
+                coords: [lat + offset, lng - offset],
+                priority: "HIGH",
+                priorityClass: "significant",
+                category: "Potential vegetation decline",
+                affectedAreaKm2: parseFloat((areaKm2 * 0.32).toFixed(1)),
+                ndviBefore: 0.64,
+                ndviAfter: 0.42,
+                vegChangePercent: parseFloat(vegDelta),
+                signalStrength: "High (0.83 confidence indicator)",
+                whyFlagged: `Concentrated canopy spectral decline observed inside custom-drawn ${areaKm2} km² perimeter.`,
+                whyItMatters: "Direct indicator of local canopy loss or thinning within the user's focus boundary.",
+                whatNotProved: "Does not confirm permanent clearing; local drought or seasonal tree fall may contribute.",
+                suggestedNextStep: "Deploy ground patrol with GPS coordinates to verify canopy condition.",
+                polygonCoords: [
+                    [lat + offset, lng - offset],
+                    [lat + offset + 0.015, lng - offset + 0.01],
+                    [lat + offset + 0.01, lng - offset + 0.025],
+                    [lat + offset - 0.01, lng - offset + 0.018]
+                ]
+            },
+            {
+                id: "CUST-02",
+                name: "Custom Perimeter — Sector South",
+                regionId: "custom",
+                coords: [lat - offset, lng + offset],
+                priority: "MEDIUM",
+                priorityClass: "moderate",
+                category: "Potential land-cover transition",
+                affectedAreaKm2: parseFloat((areaKm2 * 0.21).toFixed(1)),
+                ndviBefore: 0.58,
+                ndviAfter: 0.47,
+                vegChangePercent: -9.8,
+                signalStrength: "Medium (0.67 confidence indicator)",
+                whyFlagged: "Moderate spectral variation near peripheral edge of drawn geometry.",
+                whyItMatters: "Potential edge effects or transition to scrubland / crop cultivation.",
+                whatNotProved: "Does not differentiate between rotating crop harvesting and permanent encroachment.",
+                suggestedNextStep: "Cross-reference with seasonal planting records.",
+                polygonCoords: [
+                    [lat - offset, lng + offset],
+                    [lat - offset + 0.012, lng + offset + 0.018],
+                    [lat - offset - 0.012, lng + offset + 0.024],
+                    [lat - offset - 0.018, lng + offset + 0.01]
+                ]
+            }
+        ];
+
+        return {
+            analysis: {
+                regionId: "custom",
+                isCustomArea: true,
+                customAreaKm2: areaKm2,
+                beforeYear,
+                afterYear,
+                habitatHealth: health,
+                habitatStatus: health > 74 ? "Stable" : (health > 58 ? "Moderate" : "Significant"),
+                breakdown: {
+                    vegetation: Math.max(50, health + 5),
+                    water: Math.max(50, health - 2),
+                    stability: Math.max(50, health - 4),
+                    connectivity: Math.max(50, health - 7)
+                },
+                indicators: {
+                    vegetationChangePercent: parseFloat(vegDelta),
+                    waterChangePercent: parseFloat(waterDelta),
+                    builtUpChangePercent: +(2.6 * yearDiff).toFixed(1),
+                    areasRequiringReview: hotspots.length
+                },
+                summaryText: `User-defined custom perimeter (${areaKm2} km²) analyzed between ${beforeYear} and ${afterYear}. ${hotspots.length} concentrated areas flagged for field inspection.`,
+                simpleExplanation: `Within your drawn boundary (${areaKm2} km²), overall vegetation cover shifted by ${vegDelta}% compared to ${beforeYear}. Two locations require closer ground checking.`,
+                trends: [
+                    { year: 2024, ndvi: 0.65, ndwi: 0.35, label: "Baseline" },
+                    { year: beforeYear, ndvi: 0.61, ndwi: 0.34, label: "Prior" },
+                    { year: afterYear, ndvi: 0.49, ndwi: 0.31, label: "Current" }
+                ],
+                connectivity: {
+                    connectedPatches: Math.max(3, Math.round(areaKm2 / 4)),
+                    potentialBreaks: 2,
+                    fragmentationRating: areaKm2 > 15 ? "Moderate" : "Low",
+                    summary: `Custom perimeter encompasses ~${Math.max(3, Math.round(areaKm2 / 4))} contiguous habitat patches with 2 potential fracture lines.`
+                }
+            },
+            hotspots
+        };
+    },
+
+    /**
      * Retrieve structured report data
      */
     async getReport(regionId, beforeYear, afterYear) {
-        const [region, analysis, hotspots] = await Promise.all([
-            this.getRegion(regionId),
-            this.getAnalysis(regionId, beforeYear, afterYear),
-            this.getHotspots(regionId, beforeYear, afterYear)
-        ]);
+        let region, analysis, hotspots;
+
+        if (regionId === "custom" && window.app?.state?.customGeometry) {
+            const geom = window.app.state.customGeometry;
+            region = {
+                id: "custom",
+                name: `Custom Drawn Area (${geom.areaKm2} km²)`,
+                subtitle: `Centroid ${geom.center[0].toFixed(3)}°N, ${geom.center[1].toFixed(3)}°E`,
+                ecosystem: "User-Defined Geographical Perimeter",
+                areaKm2: geom.areaKm2
+            };
+            const customRes = await this.getCustomAreaAnalysis(geom, beforeYear, afterYear);
+            analysis = customRes.analysis;
+            hotspots = customRes.hotspots;
+        } else {
+            [region, analysis, hotspots] = await Promise.all([
+                this.getRegion(regionId),
+                this.getAnalysis(regionId, beforeYear, afterYear),
+                this.getHotspots(regionId, beforeYear, afterYear)
+            ]);
+        }
 
         return {
             title: "HabitaWatch Habitat Monitoring Report",

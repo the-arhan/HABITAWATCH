@@ -31,6 +31,7 @@ class HabitaWatchApp {
     async init() {
         this._loadLocalStorage();
         this._bindEvents();
+        this._initCompareDragger();
         await this._populateRegionSelectors();
 
         // Initialize Map
@@ -154,16 +155,24 @@ class HabitaWatchApp {
         if (beforeSelect && afterSelect) {
             beforeSelect.addEventListener("change", (e) => {
                 this.state.beforeYear = parseInt(e.target.value);
+                this._updateCompareSliderContent();
             });
             afterSelect.addEventListener("change", (e) => {
                 this.state.afterYear = parseInt(e.target.value);
+                this._updateCompareSliderContent();
             });
         }
 
         // Analyze button
         const analyzeBtn = document.getElementById("btn-analyze-main");
         if (analyzeBtn) {
-            analyzeBtn.addEventListener("click", () => this.runAnalysis());
+            analyzeBtn.addEventListener("click", () => {
+                if (this.state.isCustomArea && this.state.customGeometry) {
+                    this.analyzeCustomArea(this.state.customGeometry);
+                } else {
+                    this.runAnalysis();
+                }
+            });
         }
 
         // Simple vs Detailed view toggle
@@ -183,6 +192,14 @@ class HabitaWatchApp {
     }
 
     async selectRegion(regionId) {
+        if (regionId === "custom") {
+            if (this.state.customGeometry) {
+                await this.analyzeCustomArea(this.state.customGeometry);
+            }
+            return;
+        }
+
+        this.state.isCustomArea = false;
         this.state.regionId = regionId;
         const region = await window.HabitatDataProvider.getRegion(regionId);
         this.state.currentRegion = region;
@@ -191,6 +208,7 @@ class HabitaWatchApp {
         if (select) select.value = regionId;
 
         await this.mapController.loadRegion(region);
+        this._updateCompareSliderContent();
         this.showToast(`Monitoring area set to ${region.name}`);
     }
 
@@ -529,15 +547,233 @@ class HabitaWatchApp {
             return;
         }
 
-        container.innerHTML = this.state.analysisHistory.map(h => `
-            <div style="border-bottom: 1px solid #E7ECE6; padding: 8px 0; font-size: 12px; display: flex; align-items: center; justify-content: space-between;">
+        container.innerHTML = this.state.analysisHistory.map((h, idx) => `
+            <div style="border-bottom: 1px solid #E7ECE6; padding: 10px 0; font-size: 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
                 <div>
-                    <strong>${h.regionName}</strong> (${h.beforeYear} &rarr; ${h.afterYear})<br>
+                    <strong style="color: #355443;">${h.regionName}</strong> (${h.beforeYear} &rarr; ${h.afterYear})<br>
                     <span style="color: #5F6B63;">Health: ${h.habitatHealth}/100 &bull; ${h.reviewAreas} review areas</span>
                 </div>
-                <span style="color: #89938C;">${h.timestamp}</span>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="color: #89938C; font-size: 11px;">${h.timestamp}</span>
+                    <button class="btn btn-sm btn-secondary" onclick="window.app.openHistoryRecord(${idx})" style="padding: 2px 8px; font-size: 11px;">
+                        Open
+                    </button>
+                </div>
             </div>
         `).join('');
+    }
+
+    async openHistoryRecord(index) {
+        const record = this.state.analysisHistory[index];
+        if (!record) return;
+
+        const beforeSelect = document.getElementById("before-year-select");
+        const afterSelect = document.getElementById("after-year-select");
+        if (beforeSelect) beforeSelect.value = record.beforeYear;
+        if (afterSelect) afterSelect.value = record.afterYear;
+        this.state.beforeYear = record.beforeYear;
+        this.state.afterYear = record.afterYear;
+
+        if (record.regionId !== "custom") {
+            await this.selectRegion(record.regionId);
+            await this.runAnalysis();
+        } else if (this.state.customGeometry) {
+            await this.analyzeCustomArea(this.state.customGeometry);
+        }
+        document.getElementById("workspace-section")?.scrollIntoView({ behavior: "smooth" });
+        this.showToast(`Reloaded analysis: ${record.regionName}`);
+    }
+
+    // Custom Drawn Area Analysis and Persistence
+    async analyzeDrawnGeometry() {
+        const geom = this.mapController.lastDrawnGeometry;
+        if (!geom) {
+            this.showToast("Please draw a boundary or corridor on the map first.");
+            return;
+        }
+        await this.analyzeCustomArea(geom);
+    }
+
+    async analyzeCustomArea(geom) {
+        const analyzeBtn = document.getElementById("btn-analyze-main");
+        const progressStrip = document.getElementById("analysis-progress-strip");
+        const progressLabel = document.getElementById("analysis-step-label");
+
+        if (analyzeBtn) {
+            analyzeBtn.classList.add("loading");
+            analyzeBtn.disabled = true;
+        }
+        if (progressStrip) progressStrip.classList.add("active");
+
+        try {
+            const steps = [
+                "Clipping spatial boundary to drawn coordinates",
+                "Sampling optical indices across custom bounds",
+                "Calculating localized NDVI and NDWI deltas",
+                "Clustering potential change anomalies",
+                "Synthesizing custom monitoring report"
+            ];
+
+            for (let i = 0; i < steps.length; i++) {
+                if (progressLabel) progressLabel.innerText = `Step ${i + 1}/5: ${steps[i]}`;
+                for (let j = 1; j <= 5; j++) {
+                    const dot = document.getElementById(`step-item-${j}`);
+                    if (dot) {
+                        dot.classList.remove("current", "done");
+                        if (j < i + 1) dot.classList.add("done");
+                        else if (j === i + 1) dot.classList.add("current");
+                    }
+                }
+                await new Promise(r => setTimeout(r, 220));
+            }
+
+            const customResult = await window.HabitatDataProvider.getCustomAreaAnalysis(
+                geom,
+                this.state.beforeYear,
+                this.state.afterYear
+            );
+
+            this.state.currentAnalysis = customResult.analysis;
+            this.state.currentHotspots = customResult.hotspots;
+            this.state.isCustomArea = true;
+            this.state.customGeometry = geom;
+
+            // Add/Select custom option in region selector
+            const regionSelect = document.getElementById("region-select");
+            if (regionSelect) {
+                let opt = regionSelect.querySelector("option[value='custom']");
+                if (!opt) {
+                    opt = document.createElement("option");
+                    opt.value = "custom";
+                    regionSelect.appendChild(opt);
+                }
+                opt.innerText = `Custom Drawn Area (${geom.areaKm2} km²)`;
+                regionSelect.value = "custom";
+            }
+
+            this._renderAnalysisResults(customResult.analysis, customResult.hotspots);
+
+            // Log history
+            this._persistHistory({
+                regionName: `Custom Area (${geom.areaKm2} km²)`,
+                regionId: "custom",
+                beforeYear: this.state.beforeYear,
+                afterYear: this.state.afterYear,
+                habitatHealth: customResult.analysis.habitatHealth,
+                status: customResult.analysis.habitatStatus,
+                reviewAreas: customResult.hotspots.length,
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            });
+
+            this.showToast(`Analyzed custom area (${geom.areaKm2} km²). ${customResult.hotspots.length} hotspots detected.`);
+        } catch (err) {
+            console.error("Error analyzing drawn area:", err);
+            this.showToast("Analysis encountered an error on drawn geometry.");
+        } finally {
+            if (analyzeBtn) {
+                analyzeBtn.classList.remove("loading");
+                analyzeBtn.disabled = false;
+            }
+            if (progressStrip) progressStrip.classList.remove("active");
+        }
+    }
+
+    saveCustomDrawnArea() {
+        const geom = this.mapController.lastDrawnGeometry;
+        if (!geom) {
+            this.showToast("No drawn geometry found to save.");
+            return;
+        }
+        const defaultName = `Monitored Zone (${geom.areaKm2} km²)`;
+        const name = prompt("Enter a label for this saved monitoring area:", defaultName) || defaultName;
+
+        const record = {
+            id: `SAVED-${Date.now()}`,
+            name: name,
+            areaKm2: geom.areaKm2,
+            center: geom.center,
+            coords: geom.coords,
+            type: geom.type,
+            beforeYear: this.state.beforeYear,
+            afterYear: this.state.afterYear,
+            savedAt: new Date().toLocaleDateString()
+        };
+
+        this.state.savedAreas.unshift(record);
+        localStorage.setItem("habitawatch_saved_areas", JSON.stringify(this.state.savedAreas));
+        this.showToast(`Saved area "${name}" to local storage`);
+        this.openSavedAreasModal();
+    }
+
+    openSavedAreasModal() {
+        this._renderSavedAreasList();
+        document.getElementById("saved-areas-modal")?.classList.add("open");
+    }
+
+    _renderSavedAreasList() {
+        const container = document.getElementById("saved-areas-list-container");
+        if (!container) return;
+
+        if (this.state.savedAreas.length === 0) {
+            container.innerHTML = `
+                <div style="text-align: center; padding: 2rem; color: #89938C;">
+                    <h4>No saved monitoring areas yet</h4>
+                    <p style="font-size: 13px; margin-top: 4px;">Draw an area on the map and click 'Save to Monitored Areas' to preserve it here.</p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = this.state.savedAreas.map(item => `
+            <div class="investigation-item">
+                <div class="investigation-info">
+                    <h4>${item.name}</h4>
+                    <p style="color: #5F6B63;">Extent: <strong>${item.areaKm2} km²</strong> &bull; Saved: ${item.savedAt}</p>
+                </div>
+                <div style="display: flex; gap: 6px;">
+                    <button class="btn btn-sm btn-primary" onclick="window.app.loadSavedArea('${item.id}')">
+                        Analyze
+                    </button>
+                    <button class="btn btn-sm btn-secondary" style="color: #B76555;" onclick="window.app.deleteSavedArea('${item.id}')">
+                        Delete
+                    </button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async loadSavedArea(id) {
+        const item = this.state.savedAreas.find(s => s.id === id);
+        if (!item) return;
+
+        this.closeAllModals();
+        this.mapController.clearDrawnItems();
+
+        // Reconstruct polygon on map
+        const poly = L.polygon(item.coords, {
+            color: "#355443",
+            weight: 2.5,
+            fillColor: "#557A61",
+            fillOpacity: 0.25
+        }).addTo(this.mapController.drawnItems);
+
+        this.mapController.lastDrawnGeometry = {
+            type: item.type,
+            coords: item.coords,
+            areaKm2: item.areaKm2,
+            center: item.center,
+            bounds: poly.getBounds()
+        };
+
+        this.mapController.map.fitBounds(poly.getBounds(), { padding: [40, 40] });
+        await this.analyzeCustomArea(this.mapController.lastDrawnGeometry);
+    }
+
+    deleteSavedArea(id) {
+        this.state.savedAreas = this.state.savedAreas.filter(s => s.id !== id);
+        localStorage.setItem("habitawatch_saved_areas", JSON.stringify(this.state.savedAreas));
+        this._renderSavedAreasList();
+        this.showToast("Saved area removed");
     }
 
     setViewMode(mode) {
@@ -575,7 +811,7 @@ class HabitaWatchApp {
         if (!modal || !reportContent) return;
 
         const report = await this.reportController.generateReport(
-            this.state.regionId,
+            this.state.isCustomArea ? "custom" : this.state.regionId,
             this.state.beforeYear,
             this.state.afterYear
         );
@@ -605,55 +841,123 @@ class HabitaWatchApp {
         document.getElementById("health-calc-modal")?.classList.add("open");
     }
 
-    toggleCompareSlider() {
+    // Interactive Before / After Split Slider
+    _initCompareDragger() {
         const container = document.getElementById("compare-container");
-        const mapEl = document.getElementById("monitoring-map");
-        if (!container || !mapEl) return;
-
-        const isCurrentlyComparing = container.classList.contains("active");
-        if (!isCurrentlyComparing) {
-            container.classList.add("active");
-            mapEl.style.display = "none";
-            this._setupCompareDragger();
-            this.showToast("Before / After Comparison Mode active");
-        } else {
-            container.classList.remove("active");
-            mapEl.style.display = "block";
-            this.mapController.map.invalidateSize();
-            this.showToast("Exited Comparison Mode");
-        }
-    }
-
-    _setupCompareDragger() {
         const slider = document.getElementById("compare-slider-handle");
-        const afterLayer = document.querySelector(".compare-layer-after");
-        const container = document.getElementById("compare-container");
-        if (!slider || !afterLayer || !container) return;
+        const divider = document.getElementById("compare-divider");
+        const afterLayer = document.getElementById("compare-layer-after");
+        if (!container || !slider || !divider || !afterLayer) return;
 
         let isDragging = false;
 
-        const onMove = (e) => {
-            if (!isDragging) return;
+        const setPosition = (clientX) => {
             const rect = container.getBoundingClientRect();
-            const clientX = e.clientX || (e.touches && e.touches[0].clientX);
-            if (!clientX) return;
-
             let x = clientX - rect.left;
             x = Math.max(0, Math.min(x, rect.width));
             const pct = (x / rect.width) * 100;
 
             slider.style.left = `${pct}%`;
-            afterLayer.style.width = `${pct}%`;
+            divider.style.left = `${pct}%`;
+            afterLayer.style.clipPath = `inset(0 0 0 ${pct}%)`;
         };
 
-        const stopDrag = () => { isDragging = false; };
+        slider.addEventListener("mousedown", (e) => {
+            isDragging = true;
+            e.stopPropagation();
+            e.preventDefault();
+        });
 
-        slider.onmousedown = () => { isDragging = true; };
-        slider.ontouchstart = () => { isDragging = true; };
-        window.addEventListener("mousemove", onMove);
-        window.addEventListener("touchmove", onMove);
-        window.addEventListener("mouseup", stopDrag);
-        window.addEventListener("touchend", stopDrag);
+        container.addEventListener("mousedown", (e) => {
+            isDragging = true;
+            setPosition(e.clientX);
+        });
+
+        window.addEventListener("mousemove", (e) => {
+            if (!isDragging) return;
+            setPosition(e.clientX);
+        });
+
+        window.addEventListener("mouseup", () => {
+            isDragging = false;
+        });
+
+        // Touch support
+        slider.addEventListener("touchstart", (e) => {
+            isDragging = true;
+            e.stopPropagation();
+            if (e.cancelable) e.preventDefault();
+        }, { passive: false });
+
+        container.addEventListener("touchstart", (e) => {
+            isDragging = true;
+            if (e.touches && e.touches[0]) {
+                setPosition(e.touches[0].clientX);
+            }
+            if (e.cancelable) e.preventDefault();
+        }, { passive: false });
+
+        window.addEventListener("touchmove", (e) => {
+            if (!isDragging) return;
+            if (e.touches && e.touches[0]) {
+                setPosition(e.touches[0].clientX);
+            }
+            if (e.cancelable) e.preventDefault();
+        }, { passive: false });
+
+        window.addEventListener("touchend", () => {
+            isDragging = false;
+        });
+    }
+
+    _updateCompareSliderContent() {
+        const region = this.state.currentRegion;
+        if (!region) return;
+
+        const nameEl = document.getElementById("compare-region-name");
+        const imgBefore = document.getElementById("compare-img-before");
+        const imgAfter = document.getElementById("compare-img-after");
+        const labelBefore = document.getElementById("compare-label-before");
+        const labelAfter = document.getElementById("compare-label-after");
+
+        if (nameEl) nameEl.innerText = this.state.isCustomArea ? `Custom Area (${this.state.customGeometry?.areaKm2 || 15} km²)` : region.name;
+        if (imgBefore) imgBefore.src = region.compareBeforeImage || region.image;
+        if (imgAfter) imgAfter.src = region.compareAfterImage || region.image;
+
+        if (labelBefore) {
+            labelBefore.innerHTML = `<strong>${this.state.beforeYear} Baseline Observation</strong> &bull; ${region.compareBeforeLabel || 'Healthy Canopy'}`;
+        }
+        if (labelAfter) {
+            labelAfter.innerHTML = `<strong>${this.state.afterYear} Comparison Observation</strong> &bull; ${region.compareAfterLabel || 'Observed Canopy Stress'}`;
+        }
+    }
+
+    toggleCompareSlider() {
+        const container = document.getElementById("compare-container");
+        const mapEl = document.getElementById("monitoring-map");
+        const btn = document.getElementById("btn-compare-slider");
+        if (!container || !mapEl) return;
+
+        const isCurrentlyComparing = container.classList.contains("active");
+        if (!isCurrentlyComparing) {
+            this._updateCompareSliderContent();
+            container.classList.add("active");
+            mapEl.style.display = "none";
+            if (btn) {
+                btn.classList.add("active");
+                btn.innerText = "Exit Compare";
+            }
+            this.showToast("Before / After Comparison Mode active. Drag slider to compare.");
+        } else {
+            container.classList.remove("active");
+            mapEl.style.display = "block";
+            this.mapController.map.invalidateSize();
+            if (btn) {
+                btn.classList.remove("active");
+                btn.innerText = "Compare Slider";
+            }
+            this.showToast("Exited Comparison Mode. Interactive map restored.");
+        }
     }
 
     // Guided Demo Mode (60-90 seconds walkthrough)
